@@ -6,7 +6,8 @@ function make10( vdom, mkChildrenw ) {
     var ret = [];
     for ( var i = 0; i < 10; i++ ) {
         var children =  mkChildrenw? mkChildrenw(vdom) : [];
-        ret.push(makeNode(vdom, {name:i}, children)); 
+        var ref = makeVnode( vdom, {name:i} );
+        ret.push(makeVtree(vdom, ref, children)); 
     }
     
     return ret;
@@ -15,7 +16,8 @@ function make10( vdom, mkChildrenw ) {
 function main( ) {
     var vdom = init();
     var children = make10(vdom, make10);
-    var vnode = makeNode( vdom, {name:'a'}, children );
+    var ref = makeVnode( vdom, {name:'a'} );
+    var vnode = makeVtree( vdom, ref, children );
     setRoot( vdom, vnode )
 
     printVdom( vdom )
@@ -27,10 +29,10 @@ function printVdom( vdom, ref, padding ) {
 
     if ( padding === undefined )
         padding = "";
-
-    var node = getNode( vdom, ref );
     
-    console.log(padding + "::" + node.name);
+    var node = getNodeFromTree( vdom, ref );
+    
+    console.log("%s::%s", padding, node.name );
 
     var children = getChildren( vdom, ref );
 
@@ -39,6 +41,12 @@ function printVdom( vdom, ref, padding ) {
 }
 
 /*
+export interface Segment {
+    buffer     : ArrayBuffer;
+    head       : number;
+    view       : DataView;
+}
+
 export interface VDom {
     epoc       : number;
     tree       : Segment;
@@ -74,15 +82,15 @@ function init ( ) {
 var REF_OFFSET_BITS = 20;
 
 function refSegment ( ref ) {
-    return ref >>> 20;
+    return ref >>> 20; //REF_OFFSET_BITS
 }
 
 function refOffset ( ref ) {
-    return ref && ((1 << REF_OFFSET_BITS ) - 1);
+    return ref & ((1 << 20 ) - 1); //REF_OFFSET_BITS
 }
 
 function makeRef ( segment, offset ) {
-    return (segment << REF_OFFSET_BITS) | offset;
+    return (segment << 20) | offset; //REF_OFFSET_BITS
 }
 
 var EPOC_SIZE     = 4;
@@ -97,7 +105,7 @@ var TREE_REF_SIZE = 4;
 [ child count * TREE_REF_SIZE ]
 */
 
-function makeNode ( vdom, node, children ) {
+function makeVtree ( vdom, ref, children ) {
 
     var tree  = vdom.tree;
     var head  = tree.head;
@@ -113,7 +121,6 @@ function makeNode ( vdom, node, children ) {
     }
     
     var reference = head;
-    var ref       = storeNode( vdom, node );
     var view      = tree.view;
 
     view.setUint32( head, vdom.epoc       ); head += 4; //EPOC_SIZE;
@@ -130,13 +137,47 @@ function makeNode ( vdom, node, children ) {
 }
 
 /* --vnode--
+[ epoc EPOC_SIZE ]
 [ index INDEX_SIZE ]
 DOMnode index // many vnodes can have the same dome node but not in a single tree
 facts...
 */
 
 function makeVnode ( vdom, node ) {
+    var last    = vdom.data.length - 1;
+    var segment = vdom.data[last];
+    var head    = segment.head;
+    var space   = segment.buffer.length;
+
+    var need = EPOC_SIZE + INDEX_SIZE ; //BOOG: I don't think this works
+
+    // BUG: This is waistfull if a really big node almost fits. 
+    if ( ( space - head ) < need ) {
+        segment = makeSegment();
+        vdom.data.push(segment);
+        last++;
+        
+        head  = segment.head;
+        space = segment.buffer.length;
+
+        while ( space < need ) {
+            growSegment( segment );
+            space = segment.buffer.length;
+        }
+    }
     
+    var offset = head;
+    var index  = storeNode( vdom, node );
+    var view   = segment.view;
+    
+    view.setUint32( head, vdom.epoc ); head += 4; //INDEX_SIZE
+    view.setUint32( head, index     ); head += 4; //INDEX_SIZE
+
+    segment.head = head;
+
+    var reference = makeRef( last, offset );
+
+    return reference;
 }
 
 function setRoot ( vdom, reference ) {
@@ -163,8 +204,17 @@ function storeNode( vdom, node ) {
     return index;
 }
 
+
+function getNodeFromTree( vdom, reference ) {
+    var vnodeRef = vdom.tree.view.getUint32( reference + 4 );
+    return getNode( vdom, vnodeRef );
+}
+
 function getNode( vdom, reference ) {
-    var index = vdom.tree.view.getUint32(reference + 4); // EPOC_SIZE
+    var segmentIndex  = refSegment( reference );
+    var segmentOffset = refOffset( reference );
+    
+    var index = vdom.data[segmentIndex].view.getUint32(segmentOffset + 4); // EPOC_SIZE
 
     return vdom.nodes[ index ];
 }
