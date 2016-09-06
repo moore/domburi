@@ -5,7 +5,7 @@
 //Bug: This code only suports code points in the frist two pages
 //     so not big 5
 function ab2str (segment, offset, length) {
-    // BUG: I don't understand why Uint16Array.BYTES_PER_ELEMENT works?
+    // BUG: I don't understand why deviding by Uint16Array.BYTES_PER_ELEMENT works?
     // I thought this was suposed to be in bytes not elements!
     return String.fromCharCode.apply(null, new Uint16Array(segment.buffer, offset, length/Uint16Array.BYTES_PER_ELEMENT));
 }
