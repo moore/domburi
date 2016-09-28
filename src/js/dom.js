@@ -44,7 +44,7 @@ function make10( vdom, mkChildrenw ) {
     var ret = [];
     for ( var i = 0; i < 10; i++ ) {
         var children =  mkChildrenw? mkChildrenw(vdom) : [];
-        ret.push(makeVtree(vdom, {name:names[i], facts:{ index : "name-" + i}}, children)); 
+        ret.push(makeVtree(vdom, {name:names[i], facts:{ index : "name-" + i, name:names[i] }}, children)); 
     }
     
     return ret;
@@ -385,7 +385,7 @@ function makeFactIterator ( vdom ) {
     }
 
     function next ( ) {
-        if (fTcurrnetIndex > fCount) {
+        if (fTcurrnetIndex < fCount - 1) {
             fTcurrnetIndex++;
             return true;
         }
