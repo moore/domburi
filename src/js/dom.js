@@ -7,12 +7,12 @@
 function ab2str (segment, offset, length) {
     // BUG: I don't understand why deviding by Uint16Array.BYTES_PER_ELEMENT works?
     // I thought this was suposed to be in bytes not elements!
-    return String.fromCharCode.apply(null, new Uint16Array(segment.buffer, offset, length/Uint16Array.BYTES_PER_ELEMENT));
+    return String.fromCharCode.apply(null, new Uint8Array(segment.buffer, offset, length/Uint8Array.BYTES_PER_ELEMENT));
 }
 
 function str2ab(str, segment, offset) {
     var length = str2abLength(str);
-    var bufView = new Uint16Array(segment.buffer, offset, length);
+    var bufView = new Uint8Array(segment.buffer, offset, length);
 
     for (var i=0, strLen=str.length; i < strLen; i++) {
         bufView[i] = str.charCodeAt(i);
@@ -22,7 +22,7 @@ function str2ab(str, segment, offset) {
 }
 
 function str2abLength(str) {
-    return str.length * Uint16Array.BYTES_PER_ELEMENT;
+    return str.length * Uint8Array.BYTES_PER_ELEMENT;
 }
 
 
@@ -44,7 +44,7 @@ function make10( vdom, mkChildrenw ) {
     var ret = [];
     for ( var i = 0; i < 10; i++ ) {
         var children =  mkChildrenw? mkChildrenw(vdom) : [];
-        ret.push(makeVtree(vdom, {name:names[i], facts:{}}, children)); 
+        ret.push(makeVtree(vdom, {name:names[i], facts:{ index : "name-" + i}}, children)); 
     }
     
     return ret;
@@ -55,11 +55,11 @@ function main( ) {
     var children = make10(vdom, make10);
     var vnode = makeVtree( vdom, {name:'a', facts:{}}, children );
     setRoot( vdom, vnode )
-
-    printVdom( vdom )
+    var iterator = makeFactIterator( vdom );
+    printVdom( vdom, iterator )
 }
 
-function printVdom( vdom, ref, padding ) {
+function printVdom( vdom, iterator, ref, padding ) {
     if ( ref === undefined )
         ref = getRoot(vdom);
 
@@ -71,10 +71,18 @@ function printVdom( vdom, ref, padding ) {
     
     console.log("%s::%s '%s'", padding, nodeIndex, tagName );
 
+    var count = iterator.init(ref);
+
+    if ( count > 0 ) {
+        for ( var hasNext = true ; hasNext ; hasNext = iterator.next() ) {
+            console.log("%s  %s=%s", padding, iterator.name(), iterator.value());
+        }
+    }
+
     var children = getChildren( vdom, ref );
 
     for ( var i = 0 ; i < children.length ; i++ )
-        printVdom( vdom, children[i], padding + "  ");
+        printVdom( vdom, iterator, children[i], padding + "  ");
 }
 
 /*
@@ -130,11 +138,13 @@ function makeRef ( segment, offset ) {
     return (segment << 20) | offset; //REF_OFFSET_BITS
 }
 
-var EPOC_SIZE     = 4;
-var DATA_REF_SIZE = 4;
-var INDEX_SIZE    = 4;
-var COUNT_SIZE    = 4;
-var TREE_REF_SIZE = 4;
+var EPOC_SIZE       = 4;
+var DATA_REF_SIZE   = 4;
+var NODE_INDEX_SIZE = 4;
+var COUNT_SIZE      = 4;
+var TREE_REF_SIZE   = 4;
+var FACT_COUNT_SIZE   = 2;
+var FACT_POINTER_SIZE = 4;
 /* -- vtree -- 
 [ max epoc EPOC_SIZE ]
 [ data ref DATA_REF_SIZE ]
@@ -177,7 +187,7 @@ function makeVtree ( vdom, facts, children ) {
 
 /* --vnode--
 [ epoc EPOC_SIZE ]
-[ index INDEX_SIZE ]
+[ index NODE_INDEX_SIZE ]
 DOMnode index // many vnodes can have the same dome node but not in a single tree
 facts... ( format repeated hear for conveaonce )
 [uint16 fact count]
@@ -187,13 +197,19 @@ facts... ( format repeated hear for conveaonce )
 
 */
 
+var EPOC_OFFSET = 0;
+var NODE_INDEX_OFFSET = EPOC_OFFSET + EPOC_SIZE;
+var FACT_COUNT_OFFSET = NODE_INDEX_OFFSET + NODE_INDEX_SIZE;
+var FACT_INDEX_OFFSET = FACT_COUNT_OFFSET + FACT_COUNT_SIZE;
+
+
 function makeVnode ( vdom, node ) {
     var last    = vdom.data.length - 1;
     var segment = vdom.data[last];
     var head    = segment.head;
     var space   = segment.buffer.length;
 
-    var need = EPOC_SIZE + INDEX_SIZE + factsLength( node.name, node.facts );
+    var need = EPOC_SIZE + NODE_INDEX_SIZE + factsLength( node.name, node.facts );
 
     // BUG: This is waistfull if a really big node almost fits. 
     if ( ( space - head ) < need ) {
@@ -209,13 +225,13 @@ function makeVnode ( vdom, node ) {
             space = segment.buffer.length;
         }
     }
-    
+
     var offset = head;
     var index  = getNodeIndex( vdom );
     var view   = segment.view;
     
-    view.setUint32( head, vdom.epoc ); head += 4; //INDEX_SIZE
-    view.setUint32( head, index     ); head += 4; //INDEX_SIZE
+    view.setUint32( head + EPOC_OFFSET , vdom.epoc );
+    view.setUint32( head + NODE_INDEX_OFFSET, index );
 
     head = writeFacts(node.name, node.facts, segment, head);
     
@@ -237,8 +253,7 @@ size appropetly.
 [tag name end][name1 end][value1 end]...[nameN end][valueN end]
 [ ... fact data ... ]
 */
-var FACT_COUNT_SIZE   = 2;
-var FACT_POINTER_SIZE = 4;
+
 
 function factsLength( tag, facts ) {
 
@@ -259,33 +274,38 @@ function factsLength( tag, facts ) {
     return length;
 }
 
-function writeFacts(tag, facts, segment, offset) {
+function writeFacts(tag, facts, segment, offset) {  
     var view = segment.view
-    var indexOffset = offset + FACT_COUNT_SIZE;
+    var indexOffset = offset + FACT_INDEX_OFFSET;
     var keys = Object.keys(facts);
 
-    keys.sort();
+    view.setUint16(offset + FACT_COUNT_OFFSET, keys.length);
     
-    offset += FACT_COUNT_SIZE + FACT_POINTER_SIZE
-        + keys.length * FACT_POINTER_SIZE * 2;
+    keys.sort();
+    var startOffset = offset;
+    
+    offset = indexOffset
+        + FACT_POINTER_SIZE + keys.length * FACT_POINTER_SIZE * 2;
 
     offset = str2ab(tag, segment, offset);
 
-    view.setUint32(indexOffset, offset)
+    view.setUint32(indexOffset, offset - startOffset);
     indexOffset += FACT_POINTER_SIZE;
 
     for ( var i = 0 ; i < keys.length ; i++ ) {
         var key = keys[i];
+
         offset = str2ab(key, segment, offset);
 
-        view.setUint32(indexOffset, offset)
+        view.setUint32(indexOffset, offset - startOffset);
         indexOffset += FACT_POINTER_SIZE;
 
         offset = str2ab(facts[key], segment, offset);
-        buffer.setUint32(indexOffset, offset)
+        
+        view.setUint32(indexOffset, offset - startOffset);
         indexOffset += FACT_POINTER_SIZE;
     }
-
+    
     return offset
 }
 
@@ -317,25 +337,83 @@ function getNodeIndex ( vdom ) {
 
 function readIndex ( vdom, reference ) {
     var vref = getVnodeRef( vdom, reference);
-    return readUint32( vdom, vref, EPOC_SIZE );
+    return readUint32( vdom, vref, NODE_INDEX_OFFSET );
 }
  
 function readTagName ( vdom, reference ) {
     var vref = getVnodeRef( vdom, reference);
-    var tagEnd = readUint32( vdom, vref, EPOC_SIZE + INDEX_SIZE + FACT_COUNT_SIZE );
     var factCount = getFactCount( vdom, vref );
     var segmentOffset = refOffset( vref );
-    var tagStart = segmentOffset + EPOC_SIZE + INDEX_SIZE + FACT_COUNT_SIZE + FACT_POINTER_SIZE + factCount * FACT_POINTER_SIZE;
+    var tagStart = segmentOffset + FACT_INDEX_OFFSET + FACT_POINTER_SIZE + factCount * FACT_POINTER_SIZE * 2;
+
+    var tagEnd =  segmentOffset + readFactOffset( vdom, vref, 0 );
     var segment = getSegment( vdom, vref );
     var tag = ab2str(segment, tagStart, tagEnd - tagStart);
 
     return tag;
 }
 
+function readFactOffset ( vdom, vref, index ) {
+    return readUint32( vdom, vref, FACT_INDEX_OFFSET
+                       + index * FACT_POINTER_SIZE);
+}
+
+function makeFactIterator ( vdom ) {
+    var fVref          = undefined;
+    var fCount         = 0;
+    var fTcurrnetIndex = 0;
+    var fSegment       = undefined;
+    var fOffset        = 0;
+    
+    var iterator = {
+        init  : init,
+        next  : next,
+        name  : name,
+        value : value,
+    };
+
+    return iterator;
+
+    function init ( reference ) {
+        fVref          = getVnodeRef( vdom, reference );
+        fCount         = getFactCount( vdom, fVref );
+        fTcurrnetIndex = 0;
+        fSegment       = getSegment( vdom, fVref );
+        fOffset        = refOffset( fVref );
+
+        return fCount;
+    }
+
+    function next ( ) {
+        if (fTcurrnetIndex > fCount) {
+            fTcurrnetIndex++;
+            return true;
+        }
+
+        return false;
+    }
+
+    function name ( ) {
+        var index = fTcurrnetIndex * 2;
+        return factString( index );
+    }
+
+    function value ( ) {
+        var index = fTcurrnetIndex * 2 + 1;
+        return factString( index );
+    }
+    
+    function factString( index ) {
+        var start = fOffset + readFactOffset( vdom, fVref, index );
+        var end   = fOffset + readFactOffset( vdom, fVref, index + 1 );
+        return ab2str(fSegment, start, end - start);
+    }
+}
+
 function readUint32( vdom, vref, offset ) {    
     var segment = getSegment( vdom, vref );
     var segmentOffset = refOffset( vref );
-    
+
     return segment.view.getUint32(segmentOffset + offset );
 }
 
@@ -343,7 +421,7 @@ function getFactCount( vdom, vref ) {
     var segment = getSegment( vdom, vref );
     var segmentOffset = refOffset( vref );
     
-    return segment.view.getUint16(segmentOffset + EPOC_SIZE + INDEX_SIZE );
+    return segment.view.getUint16(segmentOffset + FACT_COUNT_OFFSET);
 }
 
 function getVnodeRef( vdom, reference ) {
