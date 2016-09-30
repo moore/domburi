@@ -2,12 +2,9 @@
 
 
 //// String <-> ArrayBuffer convertion ////
-//Bug: This code only suports code points in the frist two pages
-//     so not big 5
+//Bug: This code only suports ascii
 function ab2str (segment, offset, length) {
-    // BUG: I don't understand why deviding by Uint16Array.BYTES_PER_ELEMENT works?
-    // I thought this was suposed to be in bytes not elements!
-    return String.fromCharCode.apply(null, new Uint8Array(segment.buffer, offset, length/Uint8Array.BYTES_PER_ELEMENT));
+    return String.fromCharCode.apply(null, new Uint8Array(segment.buffer, offset, length));
 }
 
 function str2ab(str, segment, offset) {
@@ -22,7 +19,7 @@ function str2ab(str, segment, offset) {
 }
 
 function str2abLength(str) {
-    return str.length * Uint8Array.BYTES_PER_ELEMENT;
+    return str.length;
 }
 
 
@@ -67,7 +64,7 @@ function printVdom( vdom, iterator, ref, padding ) {
         padding = "";
     
     var nodeIndex = readIndex( vdom, ref );
-    var tagName   = readTagName( vdom, ref )
+    var tagName   = readTagName( vdom, ref );
     
     console.log("%s::%s '%s'", padding, nodeIndex, tagName );
 
