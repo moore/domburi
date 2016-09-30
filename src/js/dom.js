@@ -1,26 +1,6 @@
 "use strict";
 
 
-//// String <-> ArrayBuffer convertion ////
-//Bug: This code only suports ascii
-function ab2str (segment, offset, length) {
-    return String.fromCharCode.apply(null, new Uint8Array(segment.buffer, offset, length));
-}
-
-function str2ab(str, segment, offset) {
-    var length = str2abLength(str);
-    var bufView = new Uint8Array(segment.buffer, offset, length);
-
-    for (var i=0, strLen=str.length; i < strLen; i++) {
-        bufView[i] = str.charCodeAt(i);
-    }
-
-    return offset + length
-}
-
-function str2abLength(str) {
-    return str.length;
-}
 
 
 //// Test code ////
@@ -56,6 +36,8 @@ function main( ) {
     printVdom( vdom, iterator )
 }
 
+
+
 function printVdom( vdom, iterator, ref, padding ) {
     if ( ref === undefined )
         ref = getRoot(vdom);
@@ -78,23 +60,35 @@ function printVdom( vdom, iterator, ref, padding ) {
         printVdom( vdom, iterator, children[i], padding + "  ");
 }
 
+//// String <-> ArrayBuffer convertion ////
+//Bug: This code only suports ascii
+function ab2str (segment, offset, length) {
+    return String.fromCharCode.apply(null, new Uint8Array(segment.buffer, offset, length));
+}
+
+function str2ab(str, segment, offset) {
+    var length = str2abLength(str);
+    var bufView = new Uint8Array(segment.buffer, offset, length);
+
+    for (var i=0, strLen=str.length; i < strLen; i++) {
+        bufView[i] = str.charCodeAt(i);
+    }
+
+    return offset + length
+}
+
+function str2abLength(str) {
+    return str.length;
+}
+
+
 /*
 export interface Segment {
     buffer     : ArrayBuffer;
     head       : number;
     view       : DataView;
 }
-
-export interface VDom {
-    epoc       : number;
-    tree       : Segment;
-    data       : Array<Segment>;
-    root       : number;
-    nodes      : Array<Any>;
-    freeList   : Array<number>;
-}
 */
-
 function makeSegment ( ) {
     var buffer = new ArrayBuffer( 1024 * 1024 );
     return {
@@ -104,6 +98,16 @@ function makeSegment ( ) {
     };
 }
 
+/*
+export interface VDom {
+    epoc       : number;
+    tree       : Segment;
+    data       : Array<Segment>;
+    root       : number;
+    maxIndex   : number;
+    freeList   : Array<number>;
+}
+*/
 function init ( ) {
     var tree  = makeSegment( );
     var data1 = makeSegment( );
