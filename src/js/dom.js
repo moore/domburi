@@ -71,12 +71,8 @@ function printVdom( vdom, iterator, ref, padding ) {
     
     console.log("%s::%s '%s'", padding, nodeIndex, tagName );
 
-    var count = iterator.init(ref);
-
-    if ( count > 0 ) {
-        for ( var hasNext = true ; hasNext ; hasNext = iterator.next() ) {
-            console.log("%s  %s=%s", padding, iterator.name(), iterator.value());
-        }
+    for ( var count = iterator.init(ref) ; count > 0 ; count = iterator.next() ) {
+        console.log("%s  %s=%s", padding, iterator.name(), iterator.value());
     }
 
     var children = getChildren( vdom, ref );
@@ -366,10 +362,11 @@ function makeFactIterator ( vdom ) {
     var fOffset        = 0;
     
     var iterator = {
-        init  : init,
-        next  : next,
-        name  : name,
-        value : value,
+        init      : init,
+        next      : next,
+        remaining : remaining,
+        name      : name,
+        value     : value,
     };
 
     return iterator;
@@ -387,12 +384,15 @@ function makeFactIterator ( vdom ) {
     function next ( ) {
         if (fTcurrnetIndex < fCount - 1) {
             fTcurrnetIndex++;
-            return true;
         }
 
-        return false;
+        return remaining();
     }
 
+    function remaining ( ) {
+        return fCount - (fTcurrnetIndex + 1);
+    }
+    
     function name ( ) {
         var index = fTcurrnetIndex * 2;
         return factString( index );
