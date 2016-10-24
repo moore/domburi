@@ -29,8 +29,9 @@ function make10( vdom, mkChildrenw ) {
 
 function main( ) {
     var vdom = init();
+    startTree( vdom );
     var children = make10(vdom, make10);
-    var vnode = makeVtree( vdom, {name:'a', facts:{}}, children );
+    var vnode = makeVtree( vdom, {name:'root', facts:{ type: "vdom"}}, children );
     setRoot( vdom, vnode )
     var iterator = makeFactIterator( vdom );
     printVdom( vdom, iterator )
@@ -44,7 +45,7 @@ function printVdom( vdom, iterator, ref, padding ) {
 
     if ( padding === undefined )
         padding = "";
-    
+
     var nodeIndex = readIndex( vdom, ref );
     var tagName   = readTagName( vdom, ref );
     
@@ -107,6 +108,7 @@ export interface VDom {
     maxIndex   : number;
     freeList   : Array<number>;
 }
+
 */
 function init ( ) {
     var tree  = makeSegment( );
@@ -118,6 +120,9 @@ function init ( ) {
         root     : -1,
         maxIndex : 0,
         freeList : [],
+        trees    : {},
+        childCountOffset : 0,
+        childCount       : 0,
     };
 }
 
@@ -135,11 +140,11 @@ function makeRef ( segment, offset ) {
     return (segment << 20) | offset; //REF_OFFSET_BITS
 }
 
-var EPOC_SIZE       = 4;
-var DATA_REF_SIZE   = 4;
-var NODE_INDEX_SIZE = 4;
-var COUNT_SIZE      = 4;
-var TREE_REF_SIZE   = 4;
+var EPOC_SIZE         = 4;
+var DATA_REF_SIZE     = 4;
+var NODE_INDEX_SIZE   = 4;
+var COUNT_SIZE        = 4;
+var TREE_REF_SIZE     = 4;
 var FACT_COUNT_SIZE   = 2;
 var FACT_POINTER_SIZE = 4;
 /* -- vtree -- 
@@ -148,38 +153,289 @@ var FACT_POINTER_SIZE = 4;
 [ child count COUNT_SIZE ]
 [ child count * TREE_REF_SIZE ]
 */
+/*
+var VtreeBuilder = new function () {
+    return init;
 
-function makeVtree ( vdom, facts, children ) {
+    function init ( ) {
+        var fEpoc      = 0;
+        var fTree      = undefined;
+        var fData      = [makeSegment( )];
+        var fRoot      = -1;
+        var fMaxIndex  = 0;
+        var fFreeList  = [];
+        var fTrees     = {};
 
-    var tree  = vdom.tree;
-    var head  = tree.head;
-    var space = tree.buffer.length;
+        var fChildCountOffset = 0;
+        var fChildCount = 0;
 
-    var need = EPOC_SIZE + DATA_REF_SIZE + COUNT_SIZE
-        + ( TREE_REF_SIZE * children.length );
+        return {
+            startTree  : startTree,
+            startVnode : startVnode,
+            addFact    : addFact,
+            startNode  : startNode,
+            addChild   : addChild,
+        };
+
+        
+        
+        function startVnode( name ) { //-> vnodeRef
+            var last    = fData.length - 1;
+            var segment = fData[last];
+            var head    = segment.head;
+            var space   = segment.buffer.length;
+
+            var need = EPOC_SIZE + NODE_INDEX_SIZE + factsLength( node.name, node.facts );
+
+            // BUG: This is waistfull if a really big node almost fits. 
+            if ( ( space - head ) < need ) {
+
+                fData.push( makeSegment() );
+                last++;
+                
+                head  = segment.head;
+                space = segment.buffer.length;
+
+                while ( space < need ) {
+                    growSegment( segment );
+                    space = segment.buffer.length;
+                }
+            }
+
+            var offset = head;
+            var index  = getNodeIndex( );
+            var view   = segment.view;
+            
+            view.setUint32( head + EPOC_OFFSET , fEpoc );
+            view.setUint32( head + NODE_INDEX_OFFSET, index );
+
+            head = writeFacts(node.name, node.facts, segment, head);
+            
+            segment.head = head;
+
+            var reference = makeRef( last, offset );
+
+            return reference;
+            
+        }
+
+        function addFact( name, value ) { //-> error?
+            var view = segment.view
+            var indexOffset = offset + FACT_INDEX_OFFSET;
+            var keys = Object.keys(facts);
+
+            view.setUint16(offset + FACT_COUNT_OFFSET, keys.length);
+            
+            keys.sort();
+            var startOffset = offset;
+            
+            offset = indexOffset
+                + FACT_POINTER_SIZE + keys.length * FACT_POINTER_SIZE * 2;
+
+            offset = str2ab(tag, segment, offset);
+
+            view.setUint32(indexOffset, offset - startOffset);
+            indexOffset += FACT_POINTER_SIZE;
+
+            for ( var i = 0 ; i < keys.length ; i++ ) {
+                var key = keys[i];
+
+                offset = str2ab(key, segment, offset);
+
+                view.setUint32(indexOffset, offset - startOffset);
+                indexOffset += FACT_POINTER_SIZE;
+
+                offset = str2ab(facts[key], segment, offset);
+                
+                view.setUint32(indexOffset, offset - startOffset);
+                indexOffset += FACT_POINTER_SIZE;
+            }
+            
+            return offset
+
+        }
+
+        //// Private functions ////
+        function checkSpace ( need ) {
+            var head  = fTree.head;
+            var space = fTree.buffer.length;
+
+            // BUG: deal with wrapping and and GC not just growing.
+            while ( ( space - head ) < need ) {
+                growSegment( fTree );
+                space = fTree.buffer.length; 
+            }
+        }
+
+        function checkDataSpace ( need ) {
+            // BUG: This is waistfull if a really big node almost fits. 
+            if ( ( space - head ) < need ) {
+
+                fData.push( makeSegment() );
+                last++;
+                
+                head  = segment.head;
+                space = segment.buffer.length;
+
+                while ( space < need ) {
+                    growSegment( segment );
+                    space = segment.buffer.length;
+                }
+            }
+        }
+
+        
+        function getNodeIndex ( ) {
+            var index;
+    
+            if ( fFreeList.length == 0 ) {
+                fMaxIndex += 1;
+                index = fMaxIndex;
+            }
+
+            else {
+                index = fFreeList.pop();
+            }
+
+            return index;
+        }
+
+    }
+
+    
+}
+*/
+
+/*
+export interface VDom {
+    epoc       : number;
+    tree       : Segment;
+    data       : Array<Segment>;
+    root       : number;
+    maxIndex   : number;
+    freeList   : Array<number>;
+}
+
+*/
+function init ( ) {
+    return {
+        epoc             : 0,
+        tree             : undefined,
+        data             : [makeSegment( )],
+        root             : -1,
+        maxIndex         : 0,
+        freeList         : [],
+        trees            : {},
+        childCountOffset : 0,
+        childCount       : 0,
+    };
+}
+
+//// Helpers ////
+function checkSpace ( vdom, need ) {
+    var head  = vdom.tree.head;
+    var space = vdom.tree.buffer.length;
 
     // BUG: deal with wrapping and and GC not just growing.
     while ( ( space - head ) < need ) {
-        growSegment( tree );
-        space = tree.buffer.length; 
+        space = growSegment( vdom.tree );
+    }
+}
+
+function checkDataSpace ( vdom, need ) { // -> bool, new segment?
+    var segmant =  vdom.data[vdom.data.length - 1];
+    var head  = segmant.head;
+    var space = segmant.buffer.length;
+
+    // BUG: This is waistfull if a really big node almost fits. 
+    if ( ( space - head ) < need ) {
+        segmant = makeSegment();
+        fData.push( segmant );
+        
+        head  = segment.head;
+        space = segment.buffer.length;
+
+        while ( space < need ) {
+            space = growSegment( segment );
+        }
+        return true;
     }
     
-    var reference = head;
-    var view      = tree.view;
+    return false;
+}
 
-    var ref = makeVnode( vdom, facts );
+//// END Helpers ////
 
-    view.setUint32( head, vdom.epoc       ); head += 4; //EPOC_SIZE;
-    view.setUint32( head, ref             ); head += 4; //DATA_REF_SIZE;
-    view.setUint32( head, children.length ); head += 4; //COUNT_SIZE;
 
-    for ( var i = 0 ; i < children.length ; i++ ) {
-        view.setUint32( head, children[ i ] ); head += 4; //TREE_REF_SIZE;
+function startTree ( vdom ) { // -> epoc
+    if ( vdom.tree !== undefined )
+        vdom.trees[ vdom.epoc ] = vdom.tree;
+
+    vdom.epoc++;
+    vdom.tree             = makeSegment( );
+    vdom.childCountOffset = 0;
+    vdom.childCount       = 0;
+
+    return vdom.epoc;
+}
+
+function finishTree ( vdom ) {
+    finishNode( vdom );
+}
+
+function finishNode ( vdom ) {
+    if ( vdom.childCountOffset != 0 ) {
+        vdom.tree.view.setUint32(  vdom.childCountOffset,  vdom.childCount ); 
+        vdom.childCount = 0;
+        vdom.childCountOffset = 0;
     }
-    
+}
+
+function startNode( vdom, vnodeRef ) { // -> vtreeRef
+
+    finishNode( vdom );
+
+    var need = EPOC_SIZE + DATA_REF_SIZE + COUNT_SIZE;
+
+    checkSpace( vdom, need );
+
+    var tree     = vdom.tree;
+    var head     = tree.head;
+    var space    = tree.buffer.length;
+    var vtreeRef = head;
+    var view     = tree.view;
+
+    view.setUint32( head, vdom.epoc ); head += 4; //EPOC_SIZE;
+    view.setUint32( head, vnodeRef  ); head += 4; //DATA_REF_SIZE;
+    vdom.childCountOffset = head;
+    view.setUint32( head, 0         ); head += 4; //COUNT_SIZE;
+
     tree.head = head;
 
-    return reference;
+    return vtreeRef;
+}
+
+function addChild( vdom, vtreeRef ) { //-> error?
+    checkSpace( vdom, TREE_REF_SIZE );
+    vdom.childCount++;
+
+    var tree = vdom.tree;
+
+    tree.view.setUint32( tree.head, vtreeRef ); tree.head += TREE_REF_SIZE;
+}
+
+
+function makeVtree ( vdom, facts, children ) {
+
+    var vnodeRef = makeVnode( vdom, facts );
+
+    var vtreeRef = startNode( vdom, vnodeRef )
+
+    for ( var i = 0 ; i < children.length ; i++ ) {
+        addChild( vdom, children[i] )
+    }
+
+    return vtreeRef;
 }
 
 /* --vnode--
@@ -283,7 +539,7 @@ function writeFacts(tag, facts, segment, offset) {
     
     offset = indexOffset
         + FACT_POINTER_SIZE + keys.length * FACT_POINTER_SIZE * 2;
-
+    var boog = offset;
     offset = str2ab(tag, segment, offset);
 
     view.setUint32(indexOffset, offset - startOffset);
@@ -309,6 +565,7 @@ function writeFacts(tag, facts, segment, offset) {
 
 
 function setRoot ( vdom, reference ) {
+    finishTree( vdom );
     vdom.root = reference;
 }
 
@@ -345,6 +602,7 @@ function readTagName ( vdom, reference ) {
 
     var tagEnd =  segmentOffset + readFactOffset( vdom, vref, 0 );
     var segment = getSegment( vdom, vref );
+
     var tag = ab2str(segment, tagStart, tagEnd - tagStart);
 
     return tag;
@@ -459,6 +717,7 @@ function growSegment ( segment ) {
     vdom.buffer = newBuffer;
     vdom.view   = new DataView( newBuffer );
 
+    return newBuffer.length
 }
 
 // BUG: feature test for transfer()
