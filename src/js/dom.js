@@ -94,12 +94,49 @@ function main( ) {
     
     printVdom( vdom, iterator, factory )
     var printed = Date.now();
+    printStats( vdom, iterator, factory );
     console.log("write1 %s, write2 %s, diff %s, print %s, total %s",
                 firstwrite  - start,
                 secondWrite - firstwrite,
                 diffed - secondWrite,
                 printed - diffed,
                 printed - start);
+}
+
+function printStats ( vdom, iterator, factory ) {
+
+    var treeBytes = vdom.tree.head;
+    var data      = vdom.data;
+    var dataBytes = 0;
+
+    for ( var i = 0 ; i < data.length ; i++ )
+        dataBytes += data[i].head;
+
+    var count = nodeCount( vdom, iterator, factory );
+    
+    console.log( "%s nodes, tree is %s bytes (%s/node), data is %s segments and %s bytes (%s/node) (%s/setment)",
+                 count, treeBytes, Math.round(treeBytes/count),
+                 data.length, dataBytes,
+                 Math.round(dataBytes/count), Math.round(dataBytes/data.length) );
+                 
+}
+
+function nodeCount ( vdom, iterator, factory, ref ) {
+    if ( ref === undefined )
+        ref = getRoot(vdom);
+
+    var count = 1;
+
+    var childIterator = getChildIterator( factory, vdom, ref );
+
+    while ( remainingChildren( childIterator ) ) {
+        var childRef = nextChild( childIterator );
+        count += nodeCount( vdom, iterator, factory, childRef );
+    }
+
+    returnChildIterator( factory, childIterator );
+
+    return count;
 }
 
 
@@ -264,6 +301,8 @@ function diff ( vdom, patch, nodeA, nodeB ) {
 /*
 [ node index    4 byte ]
 [ parent index  4 byte ]
+[ next sibling index 4 byte ]
+[ first child index 4 byte ]
 [ fact count    2 byte ]
 [ name len      2 byte ]
 [ name bytes    n byte ]
@@ -274,12 +313,60 @@ if delete bit == 0:
 [ fact val len  4 byte ]
 [ fact val      n byte ]
 */
+/*
+-- patch --
+[ node index 4 byte ]
+[ fact count 2 byte ]
+-- fact --
+[ fact type 1 byte ]
+
+-- remove node fact --
+< fact tyep 0 >
+
+-- parent fact --
+< fact type 1 >
+[ index 4 byte ]
+
+-- next sibling fact --
+< fact type 2 >
+[ index 4 byte ] 
+
+-- first child fact --
+< fact type 3 >
+[ index 4 byte ] 
+
+-- name fact --
+< fact type 4 >
+[ name len    2 byte ]
+[ name bytes  n byte ]
+
+-- delete attribute fact --
+< fact type 5 >
+[ name len    2 byte ]
+[ name bytes  n byte ]
+
+-- set attribute string fact --
+< fact type 6 >
+[ name len    2 byte ]
+[ name bytes  n byte ]
+[ val len     4 byte ]
+[ val         n byte ]
+
+-- set attribute function fact --
+< fact type 7 >
+[ name len       2 byte ]
+[ name bytes     n byte ]
+[ func name len  4 byte ]
+[ func name      n byte ]
+
+*/
+
 function newPatch ( ) {
     return makeSegment();
 }
 
 
-function startPatch( segment, name, index ) { //-> void
+function startPatch( segment, name, index, parentIndex ) { //-> void
     var head = segment.head;
 
     // We set currnetNode so the memcpy in checkDataSpace
