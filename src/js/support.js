@@ -60,32 +60,32 @@ var Component = new function () {
 };
 
 
-
+/*
+ * TODO: Implemnt comonent recycleing in make() and free()
+ * TODO: Consider grouping mounts on single node using document fragment.
+*/
 var ManagedDom = new function () {
 
-    // don't process more then 200k worth of commands at one go.
-    const MaxReadLength = 200000;
-    
     return construct;
 
+    function ReadResult ( offset, done ) {
+        return {
+            offset: offset,
+            done  : done,
+        };
+    }
     
     function construct ( fRoot, fComponentTypes ) {
 
         var fDecoder         = new TextDecoder('utf-8');
         var fKnownComponents = {};
+        var fCommandsGuess   = 10;
         
         var self = {
             readCommands: readCommands,
         };
 
         return self;
-
-        function ReadResult ( offset, done ) {
-            return {
-                offset: offset,
-                done  : done,
-            };
-        }
         
         /*
          * stop   : [0x0]
@@ -94,94 +94,112 @@ var ManagedDom = new function () {
          * unmount: [0x3] [4 byte id]
          * setText: [0x4] [4 byte id] [4 byte slot id] [4 byte length] [...data...]
          */
-        function readCommands ( buffer, offset ) {
+        function readCommands ( buffer, offset, budget ) {
 
+            var start    = Date.now();
+            var delta    = 0;
+            var commands = 0;
+            
             var dataView = new DataView( buffer );
 
-            var maxEnd = offset + MaxReadLength;
-            
-            while (offset < maxEnd) {
-                
-                var command = dataView.getUint8(offset); offset += 1;
-                
-                if ( command === 0 ) {
-                    return ReadResult( offset, true );
-                }
+            // We try to get each loop to be 10% of budget so we
+            // one loop of head room
+            budget = budget * 0.9;
 
-                else if ( command === 1 ) {
-                    var typeId = dataView.getUint32(offset); offset += 4; 
-                    var nodeId = dataView.getUint32(offset); offset += 4;
-
-                    var result = make( typeId, nodeId );
-
-                    if (result !== true) {
-                        console.error("failed to make node, type %s, id %s, at offset %s",
-                                      typeId, nodeId, offset);
-
-                        return ReadResult( offset, true );
-                    }
-                        
-                }
-
-                else if ( command === 2 ) {
-                    var parentId = dataView.getUint32(offset); offset += 4; 
-                    var slotId   = dataView.getUint32(offset); offset += 4;
-                    var nodeId   = dataView.getUint32(offset); offset += 4;
-                    var beforeId = dataView.getInt32(offset);  offset += 4;
-
-                    var result = mount( parentId, slotId, nodeId, beforeId );
-
-                    if (result !== true) {
-                        console.error("failed to mount node, id %s, on %s slot %s at offset %s",
-                                      nodeId, parentId, slotId, offset);
-
-                        return ReadResult( offset, true );
-                    }
-
-                }
-
-                else if ( command === 3 ) {
-                    var nodeId = dataView.getUint32(offset); offset += 4;
-
-                    var result = unmount( nodeId );
-
-                    if (result !== true) {
-                        console.error("failed to unmount node, id %s, at offset %s",
-                                      nodeId, offset);
-
-                        return ReadResult( offset, true );
-                    }
-
-                }
-
-                else if ( command === 4 ) {
-                    var nodeId = dataView.getUint32(offset); offset += 4; 
-                    var slotId = dataView.getUint32(offset); offset += 4;
-                    var length = dataView.getUint32(offset); offset += 4;
-
-                    var data = buffer.slice(offset, offset + length ); offset += length;
-
-                    var text = fDecoder.decode( data );
-
-                    var result = setText( nodeId, slotId, text );
+            while ( true ) {
+                for (var i = 0; i < fCommandsGuess ; i++) {
                     
-                    if (result !== true) {
-                        console.error("failed to set slot text, id %s, slot %s at offset %s, text '%s'",
-                                      nodeId, slotId, offset, text);
-                        
+                    var command = dataView.getUint8(offset); offset += 1;
+                    
+                    if ( command === 0 ) {
+                        // BUG: handle update of fCommandsGuess hear
                         return ReadResult( offset, true );
                     }
 
+                    else if ( command === 1 ) {
+                        var typeId = dataView.getUint32(offset); offset += 4; 
+                        var nodeId = dataView.getUint32(offset); offset += 4;
+
+                        var result = make( typeId, nodeId );
+
+                        if (result !== true) {
+                            console.error("failed to make node, type %s, id %s, at offset %s",
+                                          typeId, nodeId, offset);
+
+                            return ReadResult( offset, true );
+                        }
+                        
+                    }
+
+                    else if ( command === 2 ) {
+                        var parentId = dataView.getUint32(offset); offset += 4; 
+                        var slotId   = dataView.getUint32(offset); offset += 4;
+                        var nodeId   = dataView.getUint32(offset); offset += 4;
+                        var beforeId = dataView.getInt32(offset);  offset += 4;
+
+                        var result = mount( parentId, slotId, nodeId, beforeId );
+
+                        if (result !== true) {
+                            console.error("failed to mount node, id %s, on %s slot %s at offset %s",
+                                          nodeId, parentId, slotId, offset);
+
+                            return ReadResult( offset, true );
+                        }
+
+                    }
+
+                    else if ( command === 3 ) {
+                        var nodeId = dataView.getUint32(offset); offset += 4;
+
+                        var result = unmount( nodeId );
+
+                        if (result !== true) {
+                            console.error("failed to unmount node, id %s, at offset %s",
+                                          nodeId, offset);
+
+                            return ReadResult( offset, true );
+                        }
+
+                    }
+
+                    else if ( command === 4 ) {
+                        var nodeId = dataView.getUint32(offset); offset += 4; 
+                        var slotId = dataView.getUint32(offset); offset += 4;
+                        var length = dataView.getUint32(offset); offset += 4;
+
+                        var data = buffer.slice(offset, offset + length ); offset += length;
+
+                        var text = fDecoder.decode( data );
+
+                        var result = setText( nodeId, slotId, text );
+                        
+                        if (result !== true) {
+                            console.error("failed to set slot text, id %s, slot %s at offset %s, text '%s'",
+                                          nodeId, slotId, offset, text);
+                            
+                            return ReadResult( offset, true );
+                        }
+
+                    }
+                    
+                    else {
+                        console.error("undexpected command '%s' at offset %s", command, offset);
+                        return ReadResult( offset, true );
+                    }
+                    
+
                 }
-                
-                else {
-                    console.error("undexpected command '%s' at offset %s", command, offset);
-                    return ReadResult( offset, true );
+
+                delta = Date.now() - start
+                commands += fCommandsGuess;
+
+                if ( delta >= budget ) {
+                    fCommandsGuess = Math.floor(commands * 0.1);
+                    break;
                 }
-                
 
             }
-
+            
             return ReadResult( offset, false );
         }
 

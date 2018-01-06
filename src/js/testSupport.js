@@ -30,7 +30,7 @@ function main () {
         
     writer.mount( rootId, 1, listId );
     
-    for (var i = 0 ; i < 100 ; i++) {
+    for (var i = 0 ; i < 3000 ; i++) {
         var id = nextId++;
         writer.make(2, id);
         writer.setText(id, 1, "Text for item "+id);
@@ -38,6 +38,15 @@ function main () {
     }
 
     writer.stop();
+
+    requestIdleCallback(updateDom, {timeout:100});
     
-    manager.readCommands(buffer, offset);
+    function updateDom() {
+        var result = manager.readCommands(buffer, offset, 50);
+
+        if (result.done !== true ) {
+            offset = result.offset;
+            requestIdleCallback(updateDom, {timeout:100});
+        }
+    }
 }

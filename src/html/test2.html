@@ -6,20 +6,22 @@
   </head>
   <body>
     <button onclick="main()">main()</button>
+    <div style="display:none">
+      <div id="template1">
+        This is a list:
+        <div class="slot-1">
+        </div>
+      </div>
 
+      <div id="template2">
+        <span class="slot-1">This is an element</span>
+      </div>
+    </div>
+    
     <div id="component-0" >
       <div class="component-0-slot-1"></div>
     </div>
     
-    <div id="template1">
-      This is a list:
-      <ul class="slot-1">
-      </ul>
-    </div>
-
-    <li id="template2">
-      <span class="slot-1">This is an element</span>
-    </li>
 
   </body>
 </html>
